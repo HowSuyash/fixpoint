@@ -279,7 +279,8 @@ def make_web_search(api_key: str, on_event: Callable[[dict], None], client=None)
 
     def search(query: str) -> str:
         result = client.search(query=query, search_depth="advanced", max_results=5, include_answer=True)
-        sources = [{"title": r.get("title", ""), "url": r.get("url", "")} for r in result.get("results", [])]
+        # Some page titles arrive with U+FFFD where a dash was; show a plain dash instead.
+        sources = [{"title": (r.get("title") or "").replace("�", "-"), "url": r.get("url", "")} for r in result.get("results", [])]
         on_event({"type": "web_search", "query": query, "answer": result.get("answer") or "", "sources": sources})
         lines = []
         if result.get("answer"):
