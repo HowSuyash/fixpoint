@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fixpoint · test-first bug fixing on NVIDIA Nemotron</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%2376b900'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0c0e11; --panel: #14171c; --panel2: #1a1e24; --line: #262c35; --text: #e7e9ec; --dim: #8b93a1;
+    --green: #76b900; --red: #ff6b6b; --amber: #f5b942; --nano: #76b900; --super: #4cc2ff; --ultra: #c39bff;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  header { display: flex; align-items: center; gap: 18px; padding: 14px 24px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: 20px; letter-spacing: .2px; }
+  .brand span { color: var(--green); }
+  .tagline { color: var(--dim); flex: 1; min-width: 260px; }
+  .pills { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--dim); }
+  .pill.on { color: var(--green); border-color: #3a5a10; }
+  .pill.off { color: var(--amber); border-color: #5a4510; }
+  main { display: grid; grid-template-columns: minmax(320px, 400px) 1fr; gap: 20px; padding: 20px 24px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--dim); }
+  label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 4px; }
+  select, input, textarea { width: 100%; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font: inherit; }
+  textarea { font-family: var(--mono); font-size: 12px; resize: vertical; }
+  button { margin-top: 12px; width: 100%; padding: 10px; border: 0; border-radius: 6px; background: var(--green); color: #0b0d00; font-weight: 700; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .route { display: flex; gap: 8px; align-items: baseline; margin: 6px 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .nano { background: var(--nano); } .super { background: var(--super); } .ultra { background: var(--ultra); }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+  td, th { padding: 4px 6px; text-align: right; border-bottom: 1px solid var(--line); }
+  td:first-child, th:first-child { text-align: left; }
+  th { color: var(--dim); font-weight: 500; }
+  #cost { margin-top: 10px; font-size: 13px; }
+  .steps { display: flex; list-style: none; padding: 0; margin: 0 0 16px; gap: 6px; flex-wrap: wrap; }
+  .steps li { flex: 1; min-width: 86px; text-align: center; padding: 7px 4px; border-radius: 6px; background: var(--panel); border: 1px solid var(--line); color: var(--dim); font-size: 12px; }
+  .steps li.active { border-color: var(--super); color: var(--text); box-shadow: 0 0 0 1px var(--super) inset; }
+  .steps li.done { color: var(--green); border-color: #3a5a10; }
+  .steps li.skip { opacity: .45; }
+  #banner { padding: 14px 16px; border-radius: 10px; margin-bottom: 16px; font-weight: 600; }
+  #banner.fixed { background: #1b2a07; border: 1px solid var(--green); color: #c8f08a; }
+  #banner.bad { background: #2a1010; border: 1px solid var(--red); color: #ffc2c2; }
+  #banner.warn { background: #2a210a; border: 1px solid var(--amber); color: #ffe2a8; }
+  #feed { max-height: 62vh; overflow-y: auto; padding-right: 4px; }
+  .empty { color: var(--dim); text-align: center; padding: 40px 0; }
+  .phase { margin: 18px 0 6px; font-weight: 700; display: flex; gap: 10px; align-items: baseline; }
+  .phase small { color: var(--dim); font-weight: 400; }
+  .row { display: flex; gap: 8px; align-items: baseline; padding: 3px 0 3px 12px; border-left: 2px solid var(--line); margin-left: 4px; font-size: 13px; }
+  .row .meta { color: var(--dim); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 4px; color: #0b0d00; flex: none; }
+  .badge.nano { background: var(--nano); } .badge.super { background: var(--super); } .badge.ultra { background: var(--ultra); }
+  .badge.pass { background: var(--green); } .badge.fail { background: var(--red); } .badge.tool { background: #3a414c; color: var(--text); }
+  .badge.web { background: var(--amber); }
+  .say { color: var(--dim); font-size: 12px; font-style: italic; margin: 0 0 2px 22px; white-space: pre-wrap; }
+  details { margin: 2px 0 4px 16px; }
+  summary { cursor: pointer; color: var(--dim); font-size: 12px; }
+  pre { background: #0a0c0f; border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow-x: auto; font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; margin: 6px 0; max-height: 420px; overflow-y: auto; }
+  .box { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 10px 12px; margin: 6px 0 6px 16px; font-size: 13px; }
+  .box.ultra { border-color: #5b4585; } .box.web { border-color: #6b5420; } .box.err { border-color: var(--red); color: #ffc2c2; }
+  .box b { color: var(--dim); font-weight: 600; font-size: 12px; display: block; margin-top: 6px; }
+  .box b:first-child { margin-top: 0; }
+  a { color: var(--super); }
+  .diff .add { color: #a6e36b; } .diff .del { color: #ff8f8f; } .diff .hunk { color: var(--ultra); } .diff .file { color: var(--text); font-weight: 700; }
+  #result { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  @media (max-width: 1200px) { #result { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span>&#x27F2;</span> Fixpoint</div>
+  <div class="tagline">Bug report in &rarr; failing test &rarr; green suite. NVIDIA Nemotron on Nebius Token Factory.</div>
+  <div class="pills" id="pills"></div>
+</header>
+<main>
+  <section>
+    <div class="card">
+      <h3>Bug</h3>
+      <label for="repo">Repository</label>
+      <select id="repo"></select>
+      <input id="repoUrl" placeholder="https://github.com/owner/repo" hidden>
+      <label for="issue">Bug report (or a GitHub issue URL)</label>
+      <textarea id="issue" rows="16"></textarea>
+      <button id="run">Fix it</button>
+    </div>
+    <div class="card">
+      <h3>Model routing</h3>
+      <div class="route"><span class="dot nano"></span><div><b>Nemotron Nano</b>: triage, PR write-up</div></div>
+      <div class="route"><span class="dot super"></span><div><b>Nemotron Super</b>: agent loops that write the test and the fix</div></div>
+      <div class="route"><span class="dot ultra"></span><div><b>Nemotron Ultra</b>: root-cause plan, rescue when stuck</div></div>
+      <table>
+        <thead><tr><th>Model</th><th>Calls</th><th>Tokens in</th><th>Tokens out</th></tr></thead>
+        <tbody id="usage"></tbody>
+      </table>
+      <div id="cost"></div>
+    </div>
+  </section>
+  <section>
+    <ol class="steps" id="steps"></ol>
+    <div id="banner" hidden></div>
+    <div class="card"><div id="feed"><div class="empty">Pick an example bug and press <b>Fix it</b>.</div></div></div>
+    <div id="result" hidden>
+      <div class="card"><h3>Patch</h3><pre class="diff" id="diff"></pre></div>
+      <div class="card"><h3>Pull request description</h3><pre id="pr"></pre></div>
+    </div>
+  </section>
+</main>
+<script>
+const PHASES = ["triage", "research", "plan", "baseline", "reproduce", "fix", "report"];
+const LABELS = {triage: "Triage", research: "Research", plan: "Plan", baseline: "Baseline", reproduce: "Red test", fix: "Fix", report: "Report"};
+const $ = (s) => document.querySelector(s);
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+function details(label, text, open) {
+  const d = el("details");
+  if (open) d.open = true;
+  d.append(el("summary", null, label), el("pre", null, text));
+  return d;
+}
+let info = null, source = null, feed = $("#feed");
+
+function add(node) {
+  const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
+  feed.append(node);
+  if (atBottom) feed.scrollTop = feed.scrollHeight;
+}
+
+function row(badgeCls, badgeText, text, meta) {
+  const r = el("div", "row");
+  r.append(el("span", "badge " + badgeCls, badgeText), el("span", null, text));
+  if (meta) r.append(el("span", "meta", meta));
+  add(r);
+  return r;
+}
+
+function setStep(name) {
+  const idx = PHASES.indexOf(name);
+  document.querySelectorAll("#steps li").forEach((li, i) => {
+    li.classList.toggle("active", i === idx);
+    if (i < idx && !li.classList.contains("skip")) li.classList.add("done");
+  });
+}
+
+function renderUsage(usage) {
+  const body = $("#usage");
+  body.replaceChildren();
+  for (const [tier, s] of Object.entries(usage || {})) {
+    const tr = el("tr");
+    const name = el("td");
+    name.append(el("span", "dot " + tier), document.createTextNode(" " + tier[0].toUpperCase() + tier.slice(1)));
+    tr.append(name, el("td", null, s.calls), el("td", null, s.prompt_tokens.toLocaleString()), el("td", null, s.completion_tokens.toLocaleString()));
+    body.append(tr);
+  }
+}
+
+function renderDiff(text) {
+  const pre = $("#diff");
+  pre.replaceChildren();
+  for (const line of (text || "(no changes)").split("\n")) {
+    let cls = null;
+    if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ")) cls = "file";
+    else if (line.startsWith("+")) cls = "add";
+    else if (line.startsWith("-")) cls = "del";
+    else if (line.startsWith("@@")) cls = "hunk";
+    pre.append(el("span", cls, line + "\n"));
+  }
+}
+
+function toolSummary(tool, argsText) {
+  try {
+    const a = JSON.parse(argsText);
+    if (tool === "run_tests") return a.target || "(whole suite)";
+    return a.path || a.pattern || a.query || "";
+  } catch (e) { return ""; }
+}
+
+function box(cls, fields) {
+  const b = el("div", "box " + cls);
+  for (const [label, value] of fields) {
+    if (!value) continue;
+    b.append(el("b", null, label));
+    if (value instanceof Node) b.append(value); else b.append(el("div", null, value));
+  }
+  add(b);
+}
+
+function handle(e) {
+  switch (e.type) {
+    case "start":
+      feed.replaceChildren();
+      row("tool", "start", "Workspace ready. Sandbox: " + e.sandbox + (e.tavily ? " · Tavily on" : " · Tavily off"));
+      break;
+    case "phase": {
+      setStep(e.name);
+      const h = el("div", "phase");
+      h.append(el("span", null, LABELS[e.name] || e.name), el("small", null, e.detail));
+      add(h);
+      break;
+    }
+    case "llm": {
+      row(e.tier, e.tier.toUpperCase(), e.purpose, `${e.prompt_tokens}→${e.completion_tokens} tok · ${e.seconds}s`);
+      if (e.reasoning) add(details("reasoning", e.reasoning));
+      if (e.content && e.tool_calls && e.tool_calls.length && e.content.length < 400) add(el("div", "say", e.content));
+      renderUsage(e.usage);
+      break;
+    }
+    case "triage":
+      box("", [["Summary", e.triage.summary], ["Suspect files", e.triage.suspect_files.join(", ")], ["Web query", e.triage.web_query]]);
+      break;
+    case "web_search": {
+      const list = el("div");
+      for (const s of e.sources || []) {
+        if (!/^https?:\/\//.test(s.url)) continue;
+        const a = el("a", null, s.title || s.url);
+        a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+        const line = el("div"); line.append(a); list.append(line);
+      }
+      box("web", [["Tavily search", e.query], ["Answer", e.answer], ["Sources", list]]);
+      break;
+    }
+    case "plan":
+      box("ultra", [["Root cause", e.plan.root_cause], ["Expected behaviour", e.plan.expected_behavior],
+                    ["Test plan", e.plan.test_plan], ["Fix plan", e.plan.fix_plan], ["Files read", (e.files || []).join(", ")]]);
+      break;
+    case "tool_call":
+      row("tool", e.tool, toolSummary(e.tool, e.args));
+      if (e.tool === "write_file" || e.tool === "replace_in_file") add(details("arguments", e.args));
+      break;
+    case "tool_result":
+      if (e.result.startsWith("ERROR")) row("fail", "blocked", e.result.slice(7).split("\n")[0]);
+      else if (e.tool !== "run_tests") add(details("result", e.result));
+      break;
+    case "test_run":
+      row(e.passed ? "pass" : "fail", e.passed ? "PASS" : "FAIL", e.command, e.seconds + "s");
+      add(details("test output", e.output, !e.passed && e.phase === "reproduce"));
+      break;
+    case "finish_check":
+      row(e.ok ? "pass" : "fail", e.ok ? "verified" : "rejected", e.message.split("\n")[0]);
+      break;
+    case "escalation":
+      row("ultra", "ULTRA", "Escalation: " + e.reason);
+      break;
+    case "advice":
+      box("ultra", [["Nemotron Ultra review", e.text]]);
+      break;
+    case "note":
+      row("tool", "note", e.message);
+      break;
+    case "error":
+      box("err", [["Error", e.message]]);
+      break;
+    case "report":
+      $("#pr").textContent = e.markdown;
+      break;
+    case "done":
+      finish(e.report || {});
+      break;
+  }
+}
+
+function finish(report) {
+  const banner = $("#banner");
+  const cost = report.cost_usd != null ? ` · $${report.cost_usd.toFixed(4)}` : "";
+  const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const stats = ` · ${plural(report.test_runs || 0, "test run")} · ${plural(report.escalations || 0, "escalation")} · ${report.seconds || 0}s${cost}`;
+  const messages = {
+    fixed: ["fixed", "Fixed and verified: the new test went red → green and the suite passes" + stats],
+    not_fixed: ["bad", "Reproduced the bug but could not make the suite pass" + stats],
+    not_reproduced: ["warn", "Could not write a failing test for this report, so no fix was attempted" + stats],
+    error: ["bad", "Run failed: " + (report.error || "unknown error")],
+  };
+  const [cls, text] = messages[report.status] || messages.error;
+  banner.className = cls; banner.textContent = text; banner.hidden = false;
+  document.querySelectorAll("#steps li").forEach((li) => { li.classList.remove("active"); });
+  if (report.status === "fixed") document.querySelectorAll("#steps li").forEach((li) => li.classList.add("done"));
+  if (report.usage) renderUsage(report.usage);
+  const priced = Object.values(report.usage || {}).filter((u) => u.calls && !u.priced).length;
+  $("#cost").textContent = report.cost_usd != null ? `Estimated cost: $${report.cost_usd.toFixed(4)}` + (priced ? " (models without a listed price excluded)" : "") : "";
+  if (report.diff !== undefined) { renderDiff(report.diff); $("#result").hidden = false; }
+  if (!$("#pr").textContent) $("#pr").textContent = report.report_md || "(none)";
+  $("#run").disabled = false;
+  if (source) source.close();
+}
+
+function reset() {
+  feed.replaceChildren(el("div", "empty", "Starting…"));
+  $("#banner").hidden = true; $("#result").hidden = true; $("#pr").textContent = ""; $("#cost").textContent = "";
+  renderUsage({});
+  const steps = $("#steps");
+  steps.replaceChildren(...PHASES.map((p) => { const li = el("li", null, LABELS[p]); li.dataset.phase = p; return li; }));
+}
+
+async function start() {
+  const repo = $("#repo").value === "__url" ? $("#repoUrl").value.trim() : $("#repo").value;
+  reset();
+  $("#run").disabled = true;
+  try {
+    const res = await fetch("/api/runs", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({repo, issue: $("#issue").value})});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    source = new EventSource(`/api/runs/${data.id}/events`);
+    source.onmessage = (m) => handle(JSON.parse(m.data));
+    source.addEventListener("end", () => source.close());
+  } catch (err) {
+    feed.replaceChildren();
+    box("err", [["Could not start", err.message]]);
+    $("#run").disabled = false;
+  }
+}
+
+function pill(text, state) { return el("span", "pill " + (state ? "on" : "off"), text); }
+
+async function init() {
+  reset();
+  feed.replaceChildren(el("div", "empty", "Pick an example bug and press Fix it."));
+  info = await (await fetch("/api/info")).json();
+  if (info.demo) $("#pills").append(pill("DEMO REPLAY: scripted model responses, no API calls", false));
+  $("#pills").append(
+    pill(info.demo ? "Token Factory not called" : info.nebius_key ? "Token Factory connected" : "NEBIUS_API_KEY missing", info.nebius_key && !info.demo),
+    pill(info.tavily ? "Tavily on" : "Tavily off", info.tavily),
+    pill("sandbox: " + info.sandbox, info.sandbox === "docker"),
+  );
+  for (const ex of info.examples) {
+    const o = el("option", null, `${ex.name}: ${ex.title}`); o.value = ex.name; $("#repo").append(o);
+  }
+  if (info.allow_git_urls) { const o = el("option", null, "Public git repository…"); o.value = "__url"; $("#repo").append(o); }
+  $("#repo").onchange = () => {
+    const v = $("#repo").value;
+    $("#repoUrl").hidden = v !== "__url";
+    const ex = info.examples.find((x) => x.name === v);
+    $("#issue").value = ex ? ex.issue : "";
+  };
+  $("#repo").onchange();
+  $("#run").onclick = start;
+  $("#run").disabled = !info.nebius_key;
+  if (info.public_demo) {
+    $("#issue").readOnly = true;
+    $("label[for=issue]").textContent = "Bug report (public demo: bundled examples only; run Fixpoint locally for your own repos)";
+  }
+}
+init();
+</script>
+</body>
+</html>
