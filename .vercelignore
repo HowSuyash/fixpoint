@@ -1,0 +1,12 @@
+# Never upload secrets or local artefacts.
+.env
+.venv
+out
+submission
+.git
+**/__pycache__
+**/.pytest_cache
+# The project's own test suite (the examples' tests under examples/*/tests are needed at runtime).
+/tests
+Dockerfile
+sandbox.Dockerfile

@@ -30,3 +30,6 @@ fixpoint = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.vercel]
+entrypoint = "fixpoint.server:app"

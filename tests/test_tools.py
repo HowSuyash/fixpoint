@@ -59,6 +59,22 @@ def test_replace_requires_a_unique_match(box):
     assert "scheduler/dates.py" in workspace.diff(box.root)
 
 
+def test_python_diff_matches_git_format(tmp_path, monkeypatch):
+    monkeypatch.setattr(workspace, "git_available", lambda: False)
+    work = workspace.prepare("scheduler", tmp_path)
+    assert not (work / ".git").exists()
+    dates = work / "scheduler/dates.py"
+    dates.write_text(dates.read_text().replace("d.weekday() >= 5", "d.weekday() > 4"))
+    (work / "tests/test_new.py").write_text("def test_x():\n    pass\n")
+    (work / "scheduler/__pycache__").mkdir()
+    (work / "scheduler/__pycache__/x.pyc").write_bytes(b"\0junk")
+    text = workspace.diff(work)
+    assert "diff --git a/scheduler/dates.py b/scheduler/dates.py" in text
+    assert "-    return d.weekday() >= 5\n+    return d.weekday() > 4\n" in text
+    assert "new file mode 100644\n--- /dev/null\n+++ b/tests/test_new.py" in text
+    assert "__pycache__" not in text
+
+
 def test_run_tests_and_selector_validation(box):
     assert "PASSED" in box.execute("run_tests", {})
     assert box.execute("run_tests", {"target": "tests; rm -rf /"}).startswith("ERROR")

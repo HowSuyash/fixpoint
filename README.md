@@ -78,7 +78,7 @@ Fixpoint switches to a text tool-call protocol (`<tool_call>{...}</tool_call>`) 
 ## Other Nebius services
 
 - **Nebius Serverless Endpoints**: the Docker image is built to run as one (see
-  [Deploy](#deploy-to-a-nebius-serverless-endpoint)); the container itself is the sandbox for test runs there.
+  [Deploy](#nebius-serverless-endpoint)); the container itself is the sandbox for test runs there.
 
 ## Quick start
 
@@ -146,11 +146,35 @@ All settings are environment variables (a `.env` file works). See `.env.example`
 | `FIXPOINT_ESCALATE_AFTER` | `3` | Consecutive red runs before Ultra reviews |
 | `FIXPOINT_ALLOW_GIT_URLS` | `0` | Web server only: allow cloning git URLs and GitHub issues |
 | `FIXPOINT_MAX_CONCURRENT_RUNS` | `2` | Web server only: parallel runs |
-| `FIXPOINT_PUBLIC_DEMO` | `0` (`1` in the Docker image) | Web server only: bundled examples with their own bug reports, nothing else |
-| `FIXPOINT_RUNS_PER_IP_PER_DAY` | `0` = unlimited (`5` in the image) | Web server only: runs per visitor per day |
-| `FIXPOINT_MAX_RUNS_PER_DAY` | `0` = unlimited (`100` in the image) | Web server only: total runs per day, to cap API spend |
+| `FIXPOINT_PUBLIC_DEMO` | `0` (`1` in the Docker image and on Vercel) | Web server only: bundled examples with their own bug reports, nothing else |
+| `FIXPOINT_RUNS_PER_IP_PER_DAY` | `0` = unlimited (`5` in the image and on Vercel) | Web server only: runs per visitor per day |
+| `FIXPOINT_MAX_RUNS_PER_DAY` | `0` = unlimited (`100` in the image and on Vercel) | Web server only: total runs per day, to cap API spend |
 
-## Deploy to a Nebius Serverless Endpoint
+## Deploy
+
+Each run is a single HTTP request whose response streams the run's events, so the app works on serverless hosts as
+well as on a long-lived server. Without a `git` binary, Fixpoint keeps a plain copy of the baseline and builds the
+patch in Python.
+
+### Vercel (free Hobby plan)
+
+The repository is ready for Vercel: `pyproject.toml` sets the entrypoint (`[tool.vercel] entrypoint`),
+`vercel.json` allows 300 s per request (a run takes 1–2 minutes), and `.vercelignore` keeps `.env` and local files
+out of the upload. On Vercel, Fixpoint switches on public demo mode and the daily run limits by default, and runs
+tests in the function itself (there is no Docker there).
+
+```bash
+npm i -g vercel
+vercel login
+vercel link                                   # create or pick the Vercel project
+vercel env add NEBIUS_API_KEY production      # paste the key when asked
+vercel env add TAVILY_API_KEY production
+vercel deploy --prod
+```
+
+Run limits are kept in memory per function instance, so on Vercel they are approximate.
+
+### Nebius Serverless Endpoint
 
 Build and push the app image to a registry the endpoint can pull from, then create the endpoint:
 
@@ -195,7 +219,7 @@ fixpoint/
   sandbox.py     Docker or local test execution with timeouts
   workspace.py   copy or clone the target repo into a scratch git workspace; diffs
   prompts.py     system prompts per phase
-  server.py      FastAPI app + Server-Sent Events
+  server.py      FastAPI app; each run is one request that streams Server-Sent Events
   cli.py         fixpoint run | serve | check
   static/        single-page UI
 examples/        three small repositories with real bugs and their bug reports

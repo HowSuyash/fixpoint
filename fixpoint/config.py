@@ -71,13 +71,15 @@ def load_settings(**overrides) -> Settings:
         "super": Tier("super", _env("FIXPOINT_SUPER_MODEL", "nvidia/nemotron-3-super-120b-a12b"), 8192),
         "ultra": Tier("ultra", _env("FIXPOINT_ULTRA_MODEL", "nvidia/Nemotron-3-Ultra-550b-a55b"), 16384),
     }
+    # A Vercel deployment is always public: default to demo mode with run limits (env vars still override).
+    on_vercel = os.environ.get("VERCEL") == "1"
     values = dict(
         nebius_api_key=_env("NEBIUS_API_KEY"),
         base_url=_env("NEBIUS_BASE_URL", DEFAULT_BASE_URL),
         tavily_api_key=_env("TAVILY_API_KEY"),
         tiers=tiers,
         test_command=_env("FIXPOINT_TEST_COMMAND", "python -m pytest -q -p no:cacheprovider"),
-        sandbox=_env("FIXPOINT_SANDBOX", "auto"),
+        sandbox=_env("FIXPOINT_SANDBOX", "local" if on_vercel else "auto"),
         sandbox_image=_env("FIXPOINT_SANDBOX_IMAGE", "fixpoint-sandbox"),
         test_timeout=int(_env("FIXPOINT_TEST_TIMEOUT", "120")),
         max_steps=int(_env("FIXPOINT_MAX_STEPS", "24")),
@@ -86,9 +88,9 @@ def load_settings(**overrides) -> Settings:
         allow_git_urls=_flag("FIXPOINT_ALLOW_GIT_URLS", False),
         max_concurrent_runs=int(_env("FIXPOINT_MAX_CONCURRENT_RUNS", "2")),
         # Public demo: bundled examples with their own bug reports only, so visitors cannot steer the agent.
-        public_demo=_flag("FIXPOINT_PUBLIC_DEMO", False),
-        runs_per_ip_per_day=int(_env("FIXPOINT_RUNS_PER_IP_PER_DAY", "0")),  # 0 = unlimited
-        max_runs_per_day=int(_env("FIXPOINT_MAX_RUNS_PER_DAY", "0")),  # 0 = unlimited
+        public_demo=_flag("FIXPOINT_PUBLIC_DEMO", on_vercel),
+        runs_per_ip_per_day=int(_env("FIXPOINT_RUNS_PER_IP_PER_DAY", "5" if on_vercel else "0")),  # 0 = unlimited
+        max_runs_per_day=int(_env("FIXPOINT_MAX_RUNS_PER_DAY", "100" if on_vercel else "0")),  # 0 = unlimited
     )
     values.update(overrides)
     return Settings(**values)

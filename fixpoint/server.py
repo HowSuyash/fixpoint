@@ -1,14 +1,16 @@
-"""Web app: start a run, then stream its events to the browser over Server-Sent Events."""
+"""Web app: each run is one POST request whose response streams the run's events (Server-Sent Events).
+
+Keeping the whole run inside one request means it works on serverless hosts (Vercel, Nebius Serverless
+Endpoints) as well as on a long-lived server: no background state has to survive between requests.
+"""
 
 from __future__ import annotations
 
-import asyncio
 import json
+import queue
 import tempfile
 import threading
 import time
-import uuid
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -22,30 +24,14 @@ from .sandbox import docker_ready
 
 STATIC = Path(__file__).parent / "static"
 MAX_ISSUE_CHARS = 20_000
-MAX_KEPT_RUNS = 50
+KEEPALIVE_SECONDS = 15
+DAY = 86_400
 
 settings = load_settings()
 app = FastAPI(title="Fixpoint", version=__version__)
 _slots = threading.BoundedSemaphore(settings.max_concurrent_runs)
-
-
-@dataclass
-class Run:
-    id: str
-    repo: str
-    issue: str
-    events: list[dict] = field(default_factory=list)
-    done: bool = False
-    report: dict | None = None
-
-    def add(self, event: dict) -> None:
-        self.events.append(event)  # list.append is atomic; readers only slice
-
-
-runs: dict[str, Run] = {}
 _started: dict[str, list[float]] = {}  # client IP (and "*" for everyone) -> run start times
 _started_lock = threading.Lock()
-DAY = 86_400
 
 
 class RunRequest(BaseModel):
@@ -89,19 +75,17 @@ def _resolve(repo: str, issue: str) -> tuple[str, str]:
     return repo, issue
 
 
-def _execute(run: Run) -> None:
+def _execute(repo: str, issue: str, emit) -> None:
     settings.workdir.mkdir(parents=True, exist_ok=True)
     root = Path(tempfile.mkdtemp(prefix="run-", dir=settings.workdir))
     try:
-        repo, issue = _resolve(run.repo, run.issue)
+        repo, issue = _resolve(repo, issue)
         work = workspace.prepare(repo, root, settings.allow_git_urls)
-        run.report = asdict(Fixpoint(settings, work, issue, emit=run.add).run())
+        Fixpoint(settings, work, issue, emit=emit).run()
     except Exception as exc:
-        run.add({"type": "error", "phase": "setup", "message": f"{type(exc).__name__}: {exc}"})
-        run.add({"type": "done", "phase": "done", "report": {"status": "error", "error": str(exc)}})
+        emit({"type": "error", "phase": "setup", "message": f"{type(exc).__name__}: {exc}"})
+        emit({"type": "done", "phase": "done", "report": {"status": "error", "error": str(exc)}})
     finally:
-        run.done = True
-        _slots.release()
         try:
             workspace.remove_tree(root)
         except OSError:
@@ -136,7 +120,8 @@ def info() -> dict:
 
 
 @app.post("/api/runs")
-def create_run(body: RunRequest, request: Request) -> dict:
+def create_run(body: RunRequest, request: Request) -> StreamingResponse:
+    """Run Fixpoint and stream its events until the run is done."""
     if not settings.nebius_api_key:
         raise HTTPException(503, "The server has no NEBIUS_API_KEY configured.")
     if len(body.issue) > MAX_ISSUE_CHARS:
@@ -153,45 +138,27 @@ def create_run(body: RunRequest, request: Request) -> dict:
     except HTTPException:
         _slots.release()
         raise
-    run = Run(id=uuid.uuid4().hex[:12], repo=body.repo, issue=issue)
-    runs[run.id] = run
-    for old in list(runs)[:-MAX_KEPT_RUNS]:
-        if runs[old].done:
-            runs.pop(old, None)
-    threading.Thread(target=_execute, args=(run,), daemon=True).start()
-    return {"id": run.id}
 
+    events: queue.Queue = queue.Queue()
 
-@app.get("/api/runs/{run_id}")
-def get_run(run_id: str) -> dict:
-    run = runs.get(run_id)
-    if run is None:
-        raise HTTPException(404, "Unknown run")
-    return {"id": run.id, "done": run.done, "events": len(run.events), "report": run.report}
+    def work() -> None:
+        try:
+            _execute(body.repo, issue, events.put)
+        finally:
+            _slots.release()
+            events.put(None)
 
+    threading.Thread(target=work, daemon=True).start()
 
-@app.get("/api/runs/{run_id}/events")
-async def stream_events(run_id: str, request: Request) -> StreamingResponse:
-    run = runs.get(run_id)
-    if run is None:
-        raise HTTPException(404, "Unknown run")
-    last = request.headers.get("last-event-id", "")
-    start = int(last) + 1 if last.isdigit() else 0
-
-    async def events():
-        index = start
+    def stream():
         while True:
-            batch = run.events[index:]
-            for event in batch:
-                yield f"id: {index}\ndata: {json.dumps(event, default=str)}\n\n"
-                index += 1
-            if run.done and index >= len(run.events):
-                yield "event: end\ndata: {}\n\n"
+            try:
+                event = events.get(timeout=KEEPALIVE_SECONDS)
+            except queue.Empty:
+                yield ": keep-alive\n\n"  # keeps proxies from closing a quiet connection
+                continue
+            if event is None:
                 return
-            if await request.is_disconnected():
-                return
-            if not batch:
-                yield ": keep-alive\n\n"
-            await asyncio.sleep(0.3)
+            yield f"data: {json.dumps(event, default=str)}\n\n"
 
-    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

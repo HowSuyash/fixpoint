@@ -127,7 +127,7 @@ function details(label, text, open) {
   d.append(el("summary", null, label), el("pre", null, text));
   return d;
 }
-let info = null, source = null, feed = $("#feed");
+let info = null, feed = $("#feed");
 
 function add(node) {
   const atBottom = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 80;
@@ -289,7 +289,6 @@ function finish(report) {
   if (report.diff !== undefined) { renderDiff(report.diff); $("#result").hidden = false; }
   if (!$("#pr").textContent) $("#pr").textContent = report.report_md || "(none)";
   $("#run").disabled = false;
-  if (source) source.close();
 }
 
 function reset() {
@@ -304,16 +303,38 @@ async function start() {
   const repo = $("#repo").value === "__url" ? $("#repoUrl").value.trim() : $("#repo").value;
   reset();
   $("#run").disabled = true;
+  let received = 0, finished = false;
   try {
+    // One request per run: the response streams the run's events (Server-Sent Events format).
     const res = await fetch("/api/runs", {method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({repo, issue: $("#issue").value})});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || res.statusText);
-    source = new EventSource(`/api/runs/${data.id}/events`);
-    source.onmessage = (m) => handle(JSON.parse(m.data));
-    source.addEventListener("end", () => source.close());
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || res.statusText);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, {stream: true});
+      let cut;
+      while ((cut = buffer.indexOf("\n\n")) >= 0) {
+        const block = buffer.slice(0, cut);
+        buffer = buffer.slice(cut + 2);
+        for (const line of block.split("\n")) {
+          if (!line.startsWith("data: ")) continue;
+          const event = JSON.parse(line.slice(6));
+          received += 1;
+          if (event.type === "done") finished = true;
+          handle(event);
+        }
+      }
+    }
+    if (!finished) throw new Error("The connection closed before the run finished.");
   } catch (err) {
-    feed.replaceChildren();
-    box("err", [["Could not start", err.message]]);
+    if (!received) feed.replaceChildren();
+    box("err", [[received ? "Run interrupted" : "Could not start", err.message]]);
     $("#run").disabled = false;
   }
 }

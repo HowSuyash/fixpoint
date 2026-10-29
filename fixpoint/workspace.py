@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import os
 import re
 import shutil
@@ -80,6 +81,8 @@ def prepare(source: str, root: Path, allow_git_urls: bool = True) -> Path:
     elif GIT_URL.match(source):
         if not allow_git_urls:
             raise ValueError("Cloning git URLs is disabled on this server (set FIXPOINT_ALLOW_GIT_URLS=1)")
+        if not git_available():
+            raise ValueError("Cloning needs git, which is not installed on this host")
         result = subprocess.run(["git", "clone", "--depth", "1", source, str(work)], capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"git clone failed: {result.stderr.strip()}")
@@ -88,6 +91,10 @@ def prepare(source: str, root: Path, allow_git_urls: bool = True) -> Path:
     else:
         raise ValueError(f"Unknown repository {source!r}: use an example name, a local directory or a https git URL")
 
+    if not git_available():
+        # Serverless hosts may have no git binary: keep a plain copy of the baseline and diff against it in Python.
+        shutil.copytree(work, _baseline(work), ignore=IGNORE)
+        return work
     if not (work / ".git").exists():
         git(work, "init", "-q")
     (work / ".git" / "info").mkdir(parents=True, exist_ok=True)
@@ -97,14 +104,55 @@ def prepare(source: str, root: Path, allow_git_urls: bool = True) -> Path:
     return work
 
 
+def git_available() -> bool:
+    return shutil.which("git") is not None
+
+
+def _baseline(work: Path) -> Path:
+    return work.parent / "baseline"
+
+
 def diff(work: Path) -> str:
+    if _baseline(work).is_dir():
+        return _python_diff(_baseline(work), work)
     git(work, "add", "-A")
     return git(work, "diff", "--cached", "--no-color", "HEAD")
 
 
-def changed_files(work: Path) -> list[str]:
-    git(work, "add", "-A")
-    return [line for line in git(work, "diff", "--cached", "--name-only", "HEAD").splitlines() if line]
+def _text_files(root: Path) -> dict[str, str]:
+    files = {}
+    for path in root.rglob("*"):
+        rel = path.relative_to(root)
+        if not path.is_file() or any(part in {"__pycache__", ".pytest_cache", ".git"} for part in rel.parts) or path.suffix == ".pyc":
+            continue
+        data = path.read_bytes()
+        if b"\0" not in data[:2048]:
+            files[rel.as_posix()] = data.decode("utf-8", errors="replace").replace("\r\n", "\n")
+    return files
+
+
+def _python_diff(base: Path, work: Path) -> str:
+    """A unified diff in git's format, for hosts without git."""
+    before, after = _text_files(base), _text_files(work)
+    chunks = []
+    for rel in sorted(before.keys() | after.keys()):
+        old, new = before.get(rel), after.get(rel)
+        if old == new:
+            continue
+        header = f"diff --git a/{rel} b/{rel}\n"
+        if old is None:
+            header += "new file mode 100644\n"
+        elif new is None:
+            header += "deleted file mode 100644\n"
+        old_lines = [line + "\n" for line in (old or "").splitlines()]
+        new_lines = [line + "\n" for line in (new or "").splitlines()]
+        body = difflib.unified_diff(
+            old_lines, new_lines,
+            fromfile="/dev/null" if old is None else f"a/{rel}",
+            tofile="/dev/null" if new is None else f"b/{rel}",
+        )
+        chunks.append(header + "".join(body))
+    return "".join(chunks)
 
 
 def remove_tree(path: Path) -> None:
