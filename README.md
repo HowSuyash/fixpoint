@@ -5,6 +5,11 @@ models served by Nebius Token Factory. Give it a repository and a bug report (or
 test that reproduces the bug, proves the test fails, fixes the code until the whole suite passes, and hands back a
 patch plus a pull request description.
 
+**Live demo: [fixpoint-theta.vercel.app](https://fixpoint-theta.vercel.app)**. Pick one of the bundled bugs and
+press *Fix it*. A run takes about 30 seconds and streams every model call, tool call and test run as it happens.
+
+![Fixpoint after fixing the half-cent tax rounding bug: all seven pipeline steps green, the result banner, and the agent activity feed](docs/screenshot.png)
+
 *Track: Coding and Agentic Engineering.*
 
 ## Why
@@ -259,6 +264,23 @@ Notes from building this project:
   machine-readable price list on the `/models` endpoint would let apps show accurate costs.
 - `nebius ai endpoint create` defaults to a GPU platform (H100 in eu-north1, H200 elsewhere). For CPU-only web apps
   that call Token Factory, a CPU example in the endpoint docs would help.
+
+From the live runs on the deployed demo:
+
+- **Speed is what makes the agent loop usable.** A full fix of the rounding bug took 27 seconds end to end: 13 model
+  calls (2 Nano, 10 Super, 1 Ultra) and 5 test runs. Super's agent steps took 0.5 to 2 seconds each (1.2 s on
+  average), and generation ran at roughly 200 to 330 tokens per second on all three models. Ultra wrote a 1,200-token
+  root-cause plan in under 5 seconds.
+- **Prompt tokens dominate the cost of agent loops.** In that run Super read 40,294 prompt tokens and wrote only 895,
+  because every step resends the conversation. The usage object does not say whether any of that was cached:
+  `prompt_tokens_details` is `null`, even when the same 3,200-token prompt is sent twice in a row. Reporting cached
+  tokens, with a published price for cached input, would show agent builders how to cut this cost.
+- **Super repeats itself when it is stuck.** In one run the test environment was broken (our bug: pytest was not
+  importable on the serverless host). Instead of reporting the blocker, Super spent its remaining steps on web
+  searches: 15 searches, only 5 of them distinct, with "pip install pytest" five times. Guidance for agent builders on
+  detecting repeated tool calls, or a model that is more willing to say "I can't proceed", would help.
+- Nano still has no listed price in the data our cost estimate uses, so the cost shown in the UI covers Super and
+  Ultra only.
 
 ## License
 
