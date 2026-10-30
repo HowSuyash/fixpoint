@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import os
 import re
 import shutil
@@ -50,6 +52,19 @@ def _quote(path: str) -> str:
     return subprocess.list2cmdline([path]) if os.name == "nt" else "'" + path.replace("'", "'\\''") + "'"
 
 
+@functools.lru_cache(maxsize=1)
+def _packages_dir() -> str | None:
+    """The directory this process imports pytest from.
+
+    Serverless hosts (Vercel) put the installed packages on sys.path at startup, and a child interpreter does not
+    inherit that, so local test runs pass this directory on in PYTHONPATH.
+    """
+    spec = importlib.util.find_spec("pytest")
+    if spec is None or not spec.origin:
+        return None
+    return str(Path(spec.origin).parent.parent)
+
+
 def _kill_tree(proc: subprocess.Popen) -> None:
     try:
         if os.name == "nt":
@@ -91,11 +106,13 @@ class Sandbox:
         local = command
         if command == "python" or command.startswith("python "):
             local = _quote(sys.executable) + command[len("python"):]
-        return self._exec(local, command, shell=True)
+        return self._exec(local, command, shell=True, python_path=_packages_dir())
 
-    def _exec(self, args, label: str, shell: bool, on_timeout=None) -> RunResult:
+    def _exec(self, args, label: str, shell: bool, on_timeout=None, python_path: str | None = None) -> RunResult:
         env = {k: v for k, v in os.environ.items() if not SECRET_ENV.search(k)}
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        if python_path:
+            env["PYTHONPATH"] = os.pathsep.join(filter(None, [python_path, env.get("PYTHONPATH")]))
         extra = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt" else {"start_new_session": True}
         started = time.monotonic()
         proc = subprocess.Popen(

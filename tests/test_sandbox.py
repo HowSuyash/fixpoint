@@ -1,5 +1,6 @@
 import os
 
+from fixpoint import sandbox
 from fixpoint.sandbox import Sandbox, tail
 
 
@@ -24,6 +25,18 @@ def test_secrets_are_hidden_from_code_under_test(tmp_path, monkeypatch):
     result = box.run("python -c \"import os; print(os.environ.get('NEBIUS_API_KEY', 'hidden'))\"")
     assert "hidden" in result.output and "super-secret" not in result.output
     assert os.environ["NEBIUS_API_KEY"] == "super-secret"
+
+
+def test_local_run_can_import_the_hosts_packages(tmp_path, monkeypatch):
+    # On Vercel the installed packages are on the server's sys.path only, not the child interpreter's.
+    packages = tmp_path / "packages"
+    packages.mkdir()
+    (packages / "hostonly.py").write_text("VALUE = 7\n")
+    monkeypatch.setattr(sandbox, "_packages_dir", lambda: str(packages))
+    work = tmp_path / "work"
+    work.mkdir()
+    result = Sandbox(work, mode="local", timeout=30).run('python -c "import hostonly; print(hostonly.VALUE)"')
+    assert result.passed and "7" in result.output
 
 
 def test_tail_keeps_the_end():
